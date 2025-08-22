@@ -435,16 +435,42 @@ test "string length property" {
     );
 }
 
+test "slice concatenation length property" {
+    const allocator = testing.allocator;
+
+    // Define argument type for two byte slices
+    const ConcatArgs = struct { s1: []u8, s2: []u8 };
+
+    const ConcatTests = struct {
+        fn testConcatLength(args: ConcatArgs) bool {
+            // Use ArrayList to actually concatenate the slices
+            var list = std.ArrayList(u8).init(std.heap.page_allocator);
+            defer list.deinit();
+
+            // Perform actual concatenation
+            list.appendSlice(args.s1) catch return false;
+            list.appendSlice(args.s2) catch return false;
+
+            // Test the property: length of concatenated result equals sum of lengths
+            return list.items.len == args.s1.len + args.s2.len;
+        }
+    };
+
+    const concat_prop = Property(ConcatArgs).init(ConcatTests.testConcatLength);
+
+    try concat_prop.checkWith(allocator, TestConfig{ .iterations = 100, .verbose = false }, .{ Generators.shortString(20), Generators.shortString(20) });
+}
+
 // Example main function for standalone compilation
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    print("Running Property-Based Tests...\n\n");
+    print("Running Property-Based Tests...\n\n", .{});
 
     // Test 1: Addition commutative property
-    print("Testing addition commutativity...\n");
+    print("Testing addition commutativity...\n", .{});
     const AddArgs = struct { a: i32, b: i32 };
 
     const commutative_property = Property(AddArgs).init(struct {
@@ -463,7 +489,7 @@ pub fn main() !void {
     };
 
     // Test 2: List reverse property
-    print("\nTesting list reverse property...\n");
+    print("\nTesting list reverse property...\n", .{});
     const ReverseArgs = struct { list: []i32 };
 
     const reverse_property = Property(ReverseArgs).init(struct {
@@ -488,5 +514,29 @@ pub fn main() !void {
         return;
     };
 
-    print("\nAll property tests passed!\n");
+    print("\nTesting list reverse length property...\n", .{});
+    const ReverseLenArgs = struct { list: []i32 };
+
+    const reverse_len_property = Property(ReverseLenArgs).init(struct {
+        fn test_reverse_len(args: ReverseLenArgs) bool {
+            var list_copy = std.heap.page_allocator.alloc(i32, args.list.len) catch return false;
+            defer std.heap.page_allocator.free(list_copy);
+
+            @memcpy(list_copy, args.list);
+            std.mem.reverse(i32, list_copy);
+
+            return list_copy.len == args.list.len;
+        }
+    }.test_reverse_len);
+
+    reverse_len_property.checkWith(
+        allocator,
+        TestConfig{ .iterations = 50, .verbose = true },
+        .{Generators.slice(i32, Generators.int(i32, -100, 100), 0, 10)},
+    ) catch |err| {
+        print("Test failed: {}\n", .{err});
+        return;
+    };
+
+    print("\nAll property tests passed!\n", .{});
 }
